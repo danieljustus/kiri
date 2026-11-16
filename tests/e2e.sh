@@ -554,6 +554,14 @@ t bind-file "from the mac" $D run --rm -v "$BIND/hello.txt:/etc/greeting" alpine
 # pick up saves made in an editor on the Mac. inotifyd prints n (created),
 # c (modified), w (closed after writing) and d (deleted), each once here.
 t bind-inotify "n f c f w f d f d old" bash -c "mkdir -p $BIND/watched && echo o > $BIND/watched/old && $D rm -f watcher >/dev/null 2>&1; $D run -d --name watcher -v $BIND/watched:/w alpine inotifyd - /w:ncwd >/dev/null && sleep 2 && echo a > $BIND/watched/f && sleep 1 && echo b >> $BIND/watched/f && sleep 1 && rm $BIND/watched/f && sleep 1 && rm $BIND/watched/old && sleep 1.5; $D logs watcher 2>&1 | awk '{print \$1, \$3}' | awk '!(\$0 in s) {s[\$0]; printf \"%s \", \$0}'; $D rm -f watcher >/dev/null; rm -rf $BIND/watched"
+# A file replaced on the Mac (an editor's save renames a new file onto it)
+# reads at once in a running container, and one deleted there can be made
+# again at once: the VM drops the name it still cached
+# (guest/kernel/patches/0006), which led to the old file and failed with
+# ENOENT (#399). As in bind-inotify, the Mac's changes are heard once the
+# container has run for a moment.
+t bind-replaced "two three four" bash -c "mkdir -p $BIND/replaced && $D rm -f replaced >/dev/null 2>&1; $D run -d --name replaced -v $BIND/replaced:/w alpine sleep 300 >/dev/null && sleep 2 && for v in two three four; do echo one > $BIND/replaced/f && $D exec replaced cat /w/f >/dev/null && echo \$v > $BIND/replaced/t && mv $BIND/replaced/t $BIND/replaced/f && sleep 0.3 && printf '%s ' \$($D exec replaced cat /w/f); done; $D rm -f replaced >/dev/null; rm -rf $BIND/replaced"
+t bind-recreate "again again again" bash -c "mkdir -p $BIND/recreate && $D rm -f recreate >/dev/null 2>&1; $D run -d --name recreate -v $BIND/recreate:/w alpine sleep 300 >/dev/null && sleep 2 && for i in 1 2 3; do echo m > $BIND/recreate/f && $D exec recreate cat /w/f >/dev/null && rm $BIND/recreate/f && sleep 0.3 && $D exec recreate sh -c 'echo again > /w/f' && printf '%s ' \$(cat $BIND/recreate/f); done; $D rm -f recreate >/dev/null; rm -rf $BIND/recreate"
 # A linked source is followed at every start, as Docker does: re-pointing a
 # `current` release link and restarting mounts the new target.
 t bind-link-repointed "one two one" bash -c "mkdir -p $BIND/rel/r1 $BIND/rel/r2 && echo one > $BIND/rel/r1/v && echo two > $BIND/rel/r2/v && ln -sfn r1 $BIND/rel/current && $D rm -f relink >/dev/null 2>&1; $D run -d --name relink -v $BIND/rel/current:/app alpine sleep 300 >/dev/null && a=\$($D exec relink cat /app/v) && ln -sfn r2 $BIND/rel/current && sleep 1.5 && $D restart -t 0 relink >/dev/null && b=\$($D exec relink cat /app/v) && $D stop -t 0 relink >/dev/null && ln -sfn r1 $BIND/rel/current && sleep 1.5 && $D start relink >/dev/null && c=\$($D exec relink cat /app/v); $D rm -f relink >/dev/null; rm -rf $BIND/rel; echo \$a \$b \$c"
